@@ -17,7 +17,7 @@ interface DevToArticle {
     organization_id?: number | null;
 }
 
-interface DevToArticlePayload {
+export interface DevToArticlePayload {
     article: {
         title: string;
         body_markdown: string;
