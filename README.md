@@ -1,7 +1,15 @@
 
 # All-in-One GitHub Repository-Driven Dev.to Article Management System
 
-Welcome to `devto-article-cli`! This repository is designed to be your **central hub for managing Dev.to articles**. It not only contains the Node.js command-line tool itself but also serves as the primary storage and version control system for your article content (typically within the `articles/` directory). The included CLI scripts empower you to seamlessly create, edit (in Markdown), version with Git, and publish your Dev.to articles directly from this integrated, local-first environment. This README is also intended to be interpretable by AI agents (e.g., GitHub Copilot, VSCode AI assistants) to facilitate their use of this tool.
+Welcome to `devto-article-cli`!
+
+This repository is designed to be your **central hub for managing Dev.to articles**.
+
+It not only contains the Node.js command-line tool itself but also serves as the primary storage and version control system for your article content (typically within the `articles/` directory). The included CLI scripts empower you to seamlessly create, edit (in Markdown), version with Git, and publish your Dev.to articles directly from this integrated, local-first environment.
+
+This README is also intended to be interpretable by AI agents (e.g., GitHub Copilot, VSCode AI assistants) to facilitate their use of this tool.
+
+
 
 ## Features
 
@@ -19,8 +27,11 @@ Welcome to `devto-article-cli`! This repository is designed to be your **central
     
 -   Fully automates `git add`, `git commit`, and `git push` for the publishing workflow.
     
+-   Compliant with the latest [Forem API V1 (1.0.0)](https://developers.forem.com/api).
 
-## Prerequisites
+
+
+## Prerequisites (For Users and AI Agents)
 
 -   Node.js (LTS recommended)
     
@@ -29,7 +40,7 @@ Welcome to `devto-article-cli`! This repository is designed to be your **central
 -   Dev.to account and API Key
     
 
-## Setup
+## Setup (For Users and AI Agents)
 
 1.  Fork this Repository (Recommended for Users):
     
@@ -50,7 +61,7 @@ Welcome to `devto-article-cli`! This repository is designed to be your **central
     ```
     npm install
     ```
-    
+
 4.  Build TypeScript: 
     
     This process will generate `dist` directory:
@@ -61,7 +72,15 @@ Welcome to `devto-article-cli`! This repository is designed to be your **central
     
 5.  Set Dev.to API Key:
     
-    Obtain your API key from your Dev.to Settings > Account page and set it as an OS environment variable named DEV_TO_API_KEY.
+    Obtain your API key from your Dev.to Settings > Extensions page.
+
+    ![image](https://gist.github.com/user-attachments/assets/e54343ac-ae6d-4546-84e2-6a2e703c3312)
+
+    
+    ![image](https://gist.github.com/user-attachments/assets/a7fbbe6c-eece-455a-b0db-6cd7e3ab8e63)
+
+
+    Set it as an OS environment variable named `DEV_TO_API_KEY`.
     
     -   **Windows (Command Prompt/PowerShell)**:
         
@@ -188,7 +207,7 @@ npm run article:check
 3.  The AI agent can parse the console output to understand the consistency status and inform the user or take further actions if discrepancies are critical. This command is read-only.
     
 
-## Front-matter
+## Front-matter (For AI Agents)
 
 At the beginning of your article Markdown files, include YAML front-matter like the following:
 
@@ -212,7 +231,7 @@ Include images using relative paths to files within this repository:
 ![Alt text for my image](./images/my-local-image.jpg)
 ```
 
-## Troubleshooting
+## Troubleshooting (For AI Agents)
 
 -   **API Key Error**: Ensure the `DEV_TO_API_KEY` environment variable is correctly set.
     
