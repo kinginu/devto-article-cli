@@ -50,6 +50,7 @@ Welcome to `devto-article-cli`! This repository is designed to be your **central
     ```
     npm install
     ```
+    
 4.  Build TypeScript: 
     
     This process will generate `dist` directory:
