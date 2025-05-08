@@ -77,11 +77,9 @@ This README is also intended to be interpretable by AI agents (e.g., GitHub Copi
     
     Obtain your API key from your Dev.to Settings > Extensions page.
 
-    ![image](https://gist.github.com/user-attachments/assets/e54343ac-ae6d-4546-84e2-6a2e703c3312)
+    ![image](https://raw.githubusercontent.com/ken-okabe/web-images5/main/img_1746675165695.png)
 
-    
-    ![image](https://gist.github.com/user-attachments/assets/a7fbbe6c-eece-455a-b0db-6cd7e3ab8e63)
-
+    ![image](https://raw.githubusercontent.com/ken-okabe/web-images5/main/img_1746675216227.png)
 
     Set it as an OS environment variable named `DEV_TO_API_KEY`.
     
