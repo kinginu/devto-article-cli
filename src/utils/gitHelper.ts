@@ -2,8 +2,7 @@
 import { execa, ExecaReturnValue, Options as ExecaOptions } from 'execa';
 import logger from './logger.js';
 import path from 'path';
-import fs from 'fs/promises'; // Needed for checking local files
-import matter from 'gray-matter'; // Needed for checking frontmatter
+import fs from 'fs/promises';
 import { readFileContent } from './fileHelper.js'; // Use existing helper
 
 // --- Interfaces ---
@@ -26,7 +25,6 @@ async function runGitCommand(args: string[], options: ExecaOptions = {}): Promis
         const result: ExecaReturnValue<string> = await execa('git', args, options);
         const { stdout = '', stderr = '', exitCode = 0 } = result;
 
-        // Adjusted stderr warning logic
         const isPushCommand = args[0] === 'push';
         const knownNonErrors = [
             'nothing to commit, working tree clean',
@@ -53,59 +51,50 @@ async function runGitCommand(args: string[], options: ExecaOptions = {}): Promis
     }
 }
 
-// --- Function to get changed files against remote ---
+// --- Condition A: Function to get changed files against remote ---
 async function getChangedFilesAgainstRemote(articlesDir: string): Promise<string[]> {
     let remoteBranch = '';
     try {
-        // Fetch latest changes first
         logger.info('Fetching latest changes from remote repository...');
-        await runGitCommand(['fetch', 'origin']); // Fetch from origin explicitly
+        await runGitCommand(['fetch', 'origin']);
 
-        // Determine remote tracking branch
         try {
             const { stdout: upstream } = await runGitCommand(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
             remoteBranch = upstream.trim();
             logger.debug(`Comparing against remote branch: ${remoteBranch}`);
         } catch (upstreamError: any) {
             logger.warn('Upstream branch not set or found. Comparing against default remote branches (origin/main, origin/master).');
-            try {
-                await runGitCommand(['rev-parse', '--verify', 'origin/main']);
-                remoteBranch = 'origin/main';
-            } catch {
-                try {
-                    await runGitCommand(['rev-parse', '--verify', 'origin/master']);
-                    remoteBranch = 'origin/master';
-                } catch {
-                     logger.error('Could not determine a remote branch (origin/main or origin/master) to compare against.');
-                     throw new Error('Remote tracking branch not found.');
-                }
+            try { await runGitCommand(['rev-parse', '--verify', 'origin/main']); remoteBranch = 'origin/main'; }
+            catch {
+                try { await runGitCommand(['rev-parse', '--verify', 'origin/master']); remoteBranch = 'origin/master'; }
+                catch { throw new Error('Remote tracking branch (origin/main or origin/master) not found.'); }
             }
              logger.debug(`Falling back to compare against: ${remoteBranch}`);
         }
 
-        logger.info(`Checking for changed files in '${articlesDir}' compared to '${remoteBranch}'...`);
-        // Get list of changed files (Added, Modified, Renamed) compared to the remote branch
+        logger.info(`Checking for committed changes in '${articlesDir}' compared to '${remoteBranch}'...`);
         const { stdout } = await runGitCommand(['diff', '--name-only', '--diff-filter=AMR', remoteBranch, 'HEAD', '--', articlesDir]);
         const changedFiles = stdout.split('\n').filter(file => file.trim() !== '' && file.endsWith('.md'));
         logger.debug('Files changed compared to remote:', changedFiles);
         return changedFiles; // Returns paths relative to repo root
 
     } catch (error) {
-        logger.error('Failed to get changed files against remote.');
+        logger.error(`Failed to get changed files against remote: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
     }
 }
 
-// --- Function to get local markdown files without dev_to_article_id ---
+// --- Condition B: Function to get local markdown files without dev_to_article_id ---
 async function getLocalNewMarkdownFiles(articlesDir: string): Promise<string[]> {
     const localNewFiles: string[] = [];
     const articlesDirPath = path.join(process.cwd(), articlesDir);
+    logger.info(`Scanning local directory '${articlesDir}' for new files (no Dev.to ID)...`);
     try {
         const dirents = await fs.readdir(articlesDirPath, { withFileTypes: true });
         for (const dirent of dirents) {
             if (dirent.isFile() && dirent.name.endsWith('.md')) {
                 const filePath = path.join(articlesDirPath, dirent.name);
-                const relativeFilePath = path.join(articlesDir, dirent.name).replace(/\\/g, '/'); // Relative path for consistency
+                const relativeFilePath = path.join(articlesDir, dirent.name).replace(/\\/g, '/');
                 try {
                     const { data: frontMatter } = await readFileContent(filePath);
                     if (!frontMatter.dev_to_article_id) {
@@ -128,21 +117,64 @@ async function getLocalNewMarkdownFiles(articlesDir: string): Promise<string[]> 
     }
 }
 
-// --- Function combining both checks ---
-export async function getPublishableMarkdownFiles(articlesDir: string = 'articles'): Promise<string[]> {
+// --- Condition C: Function using 'git status' to find locally changed/new files ---
+async function getLocalStatusChangedMarkdownFiles(articlesDir: string): Promise<string[]> {
     try {
-        const changedVsRemote = await getChangedFilesAgainstRemote(articlesDir);
-        const localNewFiles = await getLocalNewMarkdownFiles(articlesDir);
+        logger.info(`Checking Git status for locally changed/new Markdown files in '${articlesDir}'...`);
+        const { stdout } = await runGitCommand(['status', '--porcelain', '--untracked-files=normal', '--', articlesDir]);
+        const statusFiles: string[] = [];
+        const lines = stdout.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+            const status = line.substring(0, 2);
+            const filePathRaw = line.substring(3).trim();
+            // Handle potential quotes around filenames if they contain spaces
+            const filePath = filePathRaw.startsWith('"') && filePathRaw.endsWith('"')
+                           ? filePathRaw.substring(1, filePathRaw.length - 1)
+                           : filePathRaw;
+
+            // We are interested in Untracked (??), Modified ( M, M ), Added (A ), Renamed (R ) within the articlesDir
+            // Note: Renamed files might need special handling later if needed.
+            if (filePath.endsWith('.md') && (status.startsWith('??') || status.includes('M') || status.startsWith('A') || status.startsWith('R'))) {
+                 // Ensure the path is relative to the repo root and uses forward slashes
+                 const relativePath = path.relative(process.cwd(), path.resolve(filePath)).replace(/\\/g, '/');
+                 // Double-check it's within the target directory (git status might sometimes include parent dirs if pathspec is ambiguous)
+                 if(relativePath.startsWith(articlesDir.replace(/\\/g, '/') + '/')) {
+                    statusFiles.push(relativePath);
+                 } else {
+                     logger.debug(`Ignoring file outside target directory: ${relativePath}`);
+                 }
+            }
+        }
+        logger.debug('Files with local Git status changes (Untracked/Modified/Added/Renamed):', statusFiles);
+        return statusFiles;
+    } catch (error) {
+        logger.error('Failed to get locally changed/new Markdown files via git status.');
+        throw error;
+    }
+}
+
+
+// --- Function combining all checks (A + B + C) ---
+export async function getPublishableMarkdownFiles(articlesDir: string = 'articles'): Promise<string[]> {
+    logger.info('Determining files to publish based on remote changes, local ID status, and local Git status...');
+    try {
+        // Run checks concurrently for efficiency
+        const [changedVsRemote, localNewFiles, localStatusChanged] = await Promise.all([
+            getChangedFilesAgainstRemote(articlesDir).catch(e => { logger.warn('Could not get remote diff, proceeding without it.'); return []; }), // Condition A
+            getLocalNewMarkdownFiles(articlesDir).catch(e => { logger.warn('Could not check local files for IDs, proceeding without it.'); return []; }),     // Condition B
+            getLocalStatusChangedMarkdownFiles(articlesDir).catch(e => { logger.warn('Could not get local git status, proceeding without it.'); return []; }) // Condition C
+        ]);
 
         // Combine and deduplicate using a Set
-        const combinedSet = new Set([...changedVsRemote, ...localNewFiles]);
+        const combinedSet = new Set([...changedVsRemote, ...localNewFiles, ...localStatusChanged]);
         const publishableFiles = Array.from(combinedSet);
 
+        logger.info(`Final list of files to process: ${publishableFiles.length > 0 ? publishableFiles.join(', ') : 'None'}`);
         return publishableFiles;
     } catch (error) {
-         logger.error('Failed to determine publishable files.');
-         // Depending on desired behavior, could return empty array or re-throw
-         throw error;
+         logger.error(`Failed to determine publishable files: ${error instanceof Error ? error.message : String(error)}`);
+         throw error; // Re-throw error to stop the publish process
     }
 }
 

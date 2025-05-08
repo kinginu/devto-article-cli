@@ -39,9 +39,10 @@ export async function publishArticle(): Promise<void> {
       return;
   }
 
-  // 2. Get publishable files (Changed vs Remote OR New/ID-less local files)
+  // 2. Get publishable files (Changed vs Remote OR New/ID-less local OR Local Status Changed)
   let publishableFiles;
   try {
+    // Use the new combined function
     publishableFiles = await getPublishableMarkdownFiles(ARTICLES_DIR_NAME);
   } catch (error) {
     logger.error(`Failed to determine publishable files: ${error instanceof Error ? error.message : String(error)}`);
@@ -49,7 +50,8 @@ export async function publishArticle(): Promise<void> {
   }
 
   if (publishableFiles.length === 0) {
-    logger.info(`No changed or new (ID-less) Markdown files found in '${ARTICLES_DIR_NAME}'. Nothing to publish.`);
+    // Adjusted message to reflect the combined logic
+    logger.info(`No Markdown files found in '${ARTICLES_DIR_NAME}' that are new, locally modified, or changed compared to the remote branch. Nothing to publish.`);
     return;
   }
 
@@ -78,7 +80,7 @@ export async function publishArticle(): Promise<void> {
       // Convert local image paths for Dev.to payload
       const markdownForDevto = await convertLocalPathsToGitHubUrls(
           body_markdown,
-          relativeFilePath,
+          relativeFilePath, // Pass the relative path from repo root
           repoInfo
       );
 
@@ -110,7 +112,7 @@ export async function publishArticle(): Promise<void> {
         logger.success(`Article updated on Dev.to: ${articleUrl}`);
         filesToGitAdd.add(relativeFilePath); // Add to git list as content was processed
       } else {
-        // Create new article (because ID was missing)
+        // Create new article (because ID was missing or file was untracked initially)
         logger.info(`Publishing ${relativeFilePath} as a new article...`);
         const newArticleData = await createArticle(payloadForApi);
         articleId = newArticleData.id;
@@ -133,8 +135,7 @@ export async function publishArticle(): Promise<void> {
     }
   }
 
-  // 4. Git operations only if there were files processed (even if API failed for some)
-  //    and there are files staged for commit (filesToGitAdd).
+  // 4. Git operations only if there were files successfully processed AND added to the set
   const filesToAddArray = Array.from(filesToGitAdd);
   if (filesToAddArray.length > 0) {
     try {
@@ -143,8 +144,7 @@ export async function publishArticle(): Promise<void> {
       const commitMessage = `Publish/update articles on Dev.to\n\nProcessed files:\n${results.filter(r => r.success).map(r => `- ${path.basename(r.file)} (ID: ${r.id}) -> ${r.url}`).join('\n')}`;
       // gitCommit handles "nothing to commit" case internally
       await gitCommit(commitMessage);
-      // Only push if commit was successful (or if there was nothing to commit but we want to ensure remote is sync'd - depends on desired logic)
-      // For simplicity, we push if the commit step didn't throw an error other than "nothing to commit"
+      // Only push if commit was successful (or if there was nothing to commit)
       logger.info('Pushing changes...');
       await gitPush();
       logger.success('Commit and push to Git completed.');
