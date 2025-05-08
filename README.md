@@ -7,8 +7,11 @@ This repository is designed to be your **central hub for managing Dev.to article
 
 It not only contains the Node.js command-line tool itself but also serves as the primary storage and version control system for your article content (typically within the `articles/` directory). The included CLI scripts empower you to seamlessly create, edit (in Markdown), version with Git, and publish your Dev.to articles directly from this integrated, local-first environment.
 
+<img width="100%" src="https://raw.githubusercontent.com/ken-okabe/web-images/main/note.svg">
+
 This README is also intended to be interpretable by AI agents (e.g., GitHub Copilot, VSCode AI assistants) to facilitate their use of this tool.
 
+<img width="100%" src="https://raw.githubusercontent.com/ken-okabe/web-images/main/notefooter.svg">
 
 
 ## Features
