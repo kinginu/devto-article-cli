@@ -1,10 +1,8 @@
 // src/utils/gitHelper.ts
 import { execa, ExecaReturnValue, Options as ExecaOptions } from 'execa';
 import logger from './logger.js';
-import path from 'path';
-import fs from 'fs/promises';
-// readFileContent is still needed by checkConsistency, so keep it if check command exists
-// import { readFileContent } from './fileHelper.js'; // Not needed directly in this file anymore
+import path from 'path'; // path is used by getLocalStatusChangedMarkdownFiles
+// import fs from 'fs/promises'; // fs is not directly used in this version of gitHelper.ts
 
 // --- Interfaces ---
 interface GitResponse {
@@ -131,20 +129,25 @@ async function getLocalStatusChangedMarkdownFiles(articlesDir: string): Promise<
                            : filePathRaw;
 
             // We are interested in Untracked (??), Modified ( M, M ), Added (A ), Renamed (R ) within the articlesDir
-            if (filePath.endsWith('.md') && (status.startsWith('??') || status.includes('M') || status.startsWith('A') || status.startsWith('R'))) {
-                 // Construct path relative to repo root, assuming articlesDir is relative to root
-                 const relativePath = path.join(articlesDir, path.basename(filePath)).replace(/\\/g, '/');
-                 // Double-check it's within the target directory by comparing normalized paths
-                 const targetDirNormalized = path.normalize(articlesDir).replace(/\\/g, '/');
-                 const fileDirNormalized = path.dirname(relativePath).replace(/\\/g, '/');
+            // Ensure we only consider files directly in articlesDir, not from its subdirectories unless articlesDir itself is a path like 'content/articles'
+            // The path from `git status --porcelain` can be relative to the repo root, or relative to CWD if git is run from a subdir.
+            // Assuming this script is run from repo root, and articlesDir is like "articles".
+            if (filePath.endsWith('.md')) {
+                // filePath from 'git status --porcelain -- articlesDir' should be relative to articlesDir if it's inside,
+                // or relative to repo root if articlesDir is '.'
+                // For simplicity, we assume articlesDir is a top-level or specific sub-directory.
+                // The current logic of `git status --porcelain -- ${articlesDir}` should mean paths are relative to CWD,
+                // and if filePath starts with articlesDir, it's fine.
+                // Let's refine to ensure the file is within the articlesDir scope.
+                const fullPath = path.resolve(filePath); // Resolve to absolute path
+                const targetFullPath = path.resolve(articlesDir);
 
-                 if(fileDirNormalized === targetDirNormalized) {
-                    statusFiles.push(relativePath);
-                 } else {
-                     // This case might happen if git status includes files from subdirs not directly specified
-                     // or if path manipulation is complex. Log for debugging.
-                     logger.debug(`Ignoring file potentially outside target directory: ${relativePath} (Target: ${targetDirNormalized}, FileDir: ${fileDirNormalized})`);
-                 }
+                if (fullPath.startsWith(targetFullPath) && (status.startsWith('??') || status.includes('M') || status.startsWith('A') || status.startsWith('R'))) {
+                    // We need the path relative to the repository root for consistency
+                    const repoRoot = path.resolve((await runGitCommand(['rev-parse', '--show-toplevel'])).stdout.trim());
+                    const relativePathToRepoRoot = path.relative(repoRoot, fullPath).replace(/\\/g, '/');
+                    statusFiles.push(relativePathToRepoRoot);
+                }
             }
         }
         logger.debug('Files with local Git status changes (Untracked/Modified/Added/Renamed):', statusFiles);
@@ -179,23 +182,27 @@ export async function getPublishableMarkdownFiles(articlesDir: string = 'article
 }
 
 // --- Standard Git operations ---
-export async function gitAdd(files: string[]): Promise<void> {
-    if (!Array.isArray(files) || files.length === 0) {
-        logger.warn('Git add: No files to add.');
-        return;
-    }
-    await runGitCommand(['add', ...files]);
+
+/**
+ * Adds all changes in the working directory to the Git staging area.
+ * Equivalent to `git add -A -v`.
+ */
+export async function gitAddAll(): Promise<void> {
+    logger.info('Adding all changes to Git staging area (git add -A -v)...');
+    await runGitCommand(['add', '-A', '-v']);
 }
 
 export async function gitCommit(message: string): Promise<void> {
     try {
         await runGitCommand(['commit', '-m', message]);
+        logger.info('Changes committed to Git.');
     } catch (error: any) {
         if (error.stderr && error.stderr.includes('nothing to commit, working tree clean')) {
             logger.info('Git commit: Nothing to commit, working tree clean.');
-            return;
+            return; // Not an error in this context, just nothing to do.
         }
-        throw error;
+        // Log specific error from runGitCommand already handles full error object
+        throw error; // Re-throw to be handled by the caller if needed
     }
 }
 
@@ -207,6 +214,7 @@ export async function gitPush(): Promise<void> {
     } catch (error) {
         logger.warn('Could not determine current Git branch. Attempting generic push.');
         await runGitCommand(['push']);
+        logger.info('Push to Git attempted (generic).');
         return;
     }
 
@@ -219,28 +227,38 @@ export async function gitPush(): Promise<void> {
              if(remoteParts.length >= 2) {
                 const remoteName = remoteParts[0];
                  await runGitCommand(['push', remoteName, currentBranch]);
+                 logger.info(`Push to Git completed (${remoteName}/${currentBranch}).`);
                  return;
              }
          } catch (upstreamError) {
              // If upstream isn't set or push fails, try pushing to origin/branchName
-             logger.warn(`Upstream branch not set or push failed for '${currentBranch}'. Pushing to 'origin/${currentBranch}'.`);
+             logger.warn(`Upstream branch not set or push failed for '${currentBranch}'. Attempting to push to 'origin/${currentBranch}'.`);
              try {
                 await runGitCommand(['push', 'origin', currentBranch]);
+                logger.info(`Push to Git completed (origin/${currentBranch}).`);
                 return;
-             } catch (originPushError) {
-                 logger.error(`Failed to push to 'origin/${currentBranch}'. Attempting generic push.`);
-                 // Fallback to generic push if specific push fails
-                 await runGitCommand(['push']);
-                 return;
+             } catch (originPushError: any) {
+                 // Check if the error is because the upstream is not set and suggest --set-upstream
+                 if (originPushError.stderr && originPushError.stderr.includes('has no upstream branch')) {
+                    logger.error(`Failed to push to 'origin/${currentBranch}'. The branch may not exist on the remote or an upstream branch is not set.`);
+                    logger.info(`To push the current branch and set the remote as upstream, you can try: git push --set-upstream origin ${currentBranch}`);
+                 } else {
+                    logger.error(`Failed to push to 'origin/${currentBranch}'.`);
+                 }
+                 // Fallback to generic push might not be what user wants if specific push fails due to non-existent branch
+                 // Consider re-throwing or providing more specific guidance
+                 throw originPushError; // Re-throw the error
              }
          }
          // Fallback if parsing upstream failed unexpectedly
-         logger.warn(`Could not determine specific upstream for '${currentBranch}'. Attempting push to 'origin/${currentBranch}'.`);
+         logger.warn(`Could not determine specific upstream for '${currentBranch}'. Attempting push to 'origin/${currentBranch}' (fallback).`);
          await runGitCommand(['push', 'origin', currentBranch]);
+         logger.info(`Push to Git completed (origin/${currentBranch} - fallback).`);
 
     } else {
         logger.warn(`Current Git branch name is '${currentBranch}'. Attempting generic push or push to default upstream.`);
         await runGitCommand(['push']);
+        logger.info('Push to Git attempted (generic/default upstream).');
     }
 }
 
@@ -251,12 +269,14 @@ export async function getRepoInfo(): Promise<RepoInfo> {
         let user: string | null = null;
         let repo: string | null = null;
 
-        let match = url.match(/git@github\.com:([^\/]+)\/([^\.]+)\.git/);
+        // Try SSH format first: git@github.com:user/repo.git
+        let match = url.match(/git@github\.com:([^\/]+)\/([^\.]+)(\.git)?/);
         if (match) {
             user = match[1];
             repo = match[2];
         } else {
-            match = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\.]+)(\.git)?/);
+            // Try HTTPS format: https://github.com/user/repo.git or https://github.com/user/repo
+            match = url.match(/https:\/\/github\.com\/([^\/]+)\/([^\.]+?)(\.git)?$/);
             if (match) {
                 user = match[1];
                 repo = match[2];
@@ -264,21 +284,43 @@ export async function getRepoInfo(): Promise<RepoInfo> {
         }
 
         if (!user || !repo) {
-            throw new Error(`Could not parse user/repo from remote URL: ${url}`);
+            logger.warn(`Could not parse user/repo from remote URL: ${url}. Will attempt to use GitHub Actions environment variables if available.`);
+            // Fallback to GitHub Actions environment variables if available
+            const githubRepository = process.env.GITHUB_REPOSITORY; // Format: owner/repository
+            if (githubRepository) {
+                const parts = githubRepository.split('/');
+                if (parts.length === 2) {
+                    user = parts[0];
+                    repo = parts[1];
+                    logger.info(`Using GITHUB_REPOSITORY: ${user}/${repo}`);
+                }
+            } else {
+                 throw new Error(`Could not parse user/repo from remote URL: ${url} and GITHUB_REPOSITORY env var not set.`);
+            }
         }
 
+
         const { stdout: branch } = await runGitCommand(['rev-parse', '--abbrev-ref', 'HEAD']);
-        let remoteBranch : string | null = null;
+        let remoteBranchValue : string | null = null; // Renamed to avoid conflict with 'remoteBranch' in RepoInfo
          try {
              const { stdout: upstream } = await runGitCommand(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-             remoteBranch = upstream.trim();
+             remoteBranchValue = upstream.trim();
          } catch {
              logger.debug('No upstream branch configured for current branch.');
+             // Fallback for branch name if GITHUB_REF is available (e.g., in GitHub Actions)
+             const githubRef = process.env.GITHUB_REF; // Format: refs/heads/branch_name or refs/tags/tag_name
+             if (githubRef && githubRef.startsWith('refs/heads/')) {
+                 const actionBranch = githubRef.substring('refs/heads/'.length);
+                 if (branch.trim() === actionBranch) { // Ensure it's the same branch
+                    logger.info(`Using GITHUB_REF for remote branch hint: origin/${actionBranch}`);
+                    // This doesn't directly give remoteBranch, but implies origin/branch_name might be the target
+                 }
+             }
          }
 
-        return { user, repo, branch: branch.trim(), remoteBranch };
+        return { user, repo, branch: branch.trim(), remoteBranch: remoteBranchValue };
     } catch (error) {
         logger.error(`Failed to get repository info: ${error instanceof Error ? error.message : String(error)}`);
-        return { user: null, repo: null, branch: null, remoteBranch: null };
+        return { user: null, repo: null, branch: null, remoteBranch: null }; // Return nulls to be checked by caller
     }
 }

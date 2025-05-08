@@ -182,6 +182,14 @@ npm run article:publish
     -   `git push` the commit to the remote GitHub repository.
         
 4.  No manual Git commands are needed from the AI agent for this step. Console logs will indicate success or failure.
+
+<img width="100%" src="https://raw.githubusercontent.com/ken-okabe/web-images/main/note.svg">
+
+When posting with images from a repository, the forked repository must be public because Dev.to cannot access images in private GitHub repositories.
+
+For text-only posts, the forked repository can be private as no such web links are generated. Alternatively, if images are hosted separately where Dev.to can access them, the forked repository can also remain private.
+
+<img width="100%" src="https://raw.githubusercontent.com/ken-okabe/web-images/main/notefooter.svg">
     
 
 ### Checking Consistency (`article:check`)
