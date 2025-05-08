@@ -3,11 +3,11 @@ import path from 'path';
 import fs from 'fs/promises';
 import matter from 'gray-matter';
 import logger from '../utils/logger.js';
-// Import the combined file getter function and other necessary git functions
+// Import the A+C file getter function
 import { gitAdd, gitCommit, gitPush, getRepoInfo, getPublishableMarkdownFiles } from '../utils/gitHelper.js';
 import { createArticle, updateArticle } from '../utils/devtoApi.js';
-import type { DevToArticlePayload } from '../utils/devtoApi.js'; // Correct type import
-import { readFileContent } from '../utils/fileHelper.js'; // Use readFileContent
+import type { DevToArticlePayload } from '../utils/devtoApi.js';
+import { readFileContent } from '../utils/fileHelper.js';
 import { convertLocalPathsToGitHubUrls } from '../utils/imageHandler.js';
 
 // Configuration: Default articles directory.
@@ -39,10 +39,10 @@ export async function publishArticle(): Promise<void> {
       return;
   }
 
-  // 2. Get publishable files (Changed vs Remote OR New/ID-less local OR Local Status Changed)
+  // 2. Get publishable files (Changed vs Remote OR Local Status Changed)
   let publishableFiles;
   try {
-    // Use the new combined function
+    // Use the A+C logic function
     publishableFiles = await getPublishableMarkdownFiles(ARTICLES_DIR_NAME);
   } catch (error) {
     logger.error(`Failed to determine publishable files: ${error instanceof Error ? error.message : String(error)}`);
@@ -50,12 +50,12 @@ export async function publishArticle(): Promise<void> {
   }
 
   if (publishableFiles.length === 0) {
-    // Adjusted message to reflect the combined logic
-    logger.info(`No Markdown files found in '${ARTICLES_DIR_NAME}' that are new, locally modified, or changed compared to the remote branch. Nothing to publish.`);
+    // Updated message to reflect A+C logic
+    logger.info(`No Markdown files found in '${ARTICLES_DIR_NAME}' that have local changes or are different from the remote branch. Nothing to publish.`);
     return;
   }
 
-  logger.info(`Found ${publishableFiles.length} Markdown file(s) to process:`);
+  logger.info(`Found ${publishableFiles.length} Markdown file(s) to process (new/modified locally or changed vs remote):`);
   publishableFiles.forEach(f => logger.info(` - ${f}`));
 
 
@@ -63,11 +63,10 @@ export async function publishArticle(): Promise<void> {
   const filesToGitAdd = new Set<string>(); // Store relative paths from repo root
 
   // 3. Process each publishable file
-  for (const relativeFilePath of publishableFiles) { // relativeFilePath is from repo root, e.g., "articles/file.md"
+  for (const relativeFilePath of publishableFiles) {
     const absoluteFilePath = path.join(process.cwd(), relativeFilePath);
     logger.info(`Processing: ${relativeFilePath}`);
     try {
-      // Read the current content from the local file
       const fileContent = await fs.readFile(absoluteFilePath, 'utf8');
       let { data: frontMatter, content: body_markdown } = matter(fileContent);
 
@@ -77,10 +76,9 @@ export async function publishArticle(): Promise<void> {
         continue;
       }
 
-      // Convert local image paths for Dev.to payload
       const markdownForDevto = await convertLocalPathsToGitHubUrls(
           body_markdown,
-          relativeFilePath, // Pass the relative path from repo root
+          relativeFilePath,
           repoInfo
       );
 
@@ -110,22 +108,21 @@ export async function publishArticle(): Promise<void> {
         const updatedArticle = await updateArticle(articleId, payloadForApi);
         articleUrl = updatedArticle.url;
         logger.success(`Article updated on Dev.to: ${articleUrl}`);
-        filesToGitAdd.add(relativeFilePath); // Add to git list as content was processed
+        filesToGitAdd.add(relativeFilePath);
       } else {
-        // Create new article (because ID was missing or file was untracked initially)
+        // Create new article
         logger.info(`Publishing ${relativeFilePath} as a new article...`);
         const newArticleData = await createArticle(payloadForApi);
         articleId = newArticleData.id;
         articleUrl = newArticleData.url;
 
-        // Add ID to front-matter of the original local file
         frontMatter.dev_to_article_id = articleId;
         const newLocalFileContent = matter.stringify(body_markdown, frontMatter);
         await fs.writeFile(absoluteFilePath, newLocalFileContent, 'utf8');
         frontMatterModifiedInScript = true;
         logger.info(`Article ID ${articleId} added to local file ${relativeFilePath}.`);
         logger.success(`New article published on Dev.to: ${articleUrl}`);
-        filesToGitAdd.add(relativeFilePath); // Add because front-matter changed
+        filesToGitAdd.add(relativeFilePath);
       }
       results.push({ file: relativeFilePath, success: true, url: articleUrl, id: articleId as number });
 
@@ -135,16 +132,14 @@ export async function publishArticle(): Promise<void> {
     }
   }
 
-  // 4. Git operations only if there were files successfully processed AND added to the set
+  // 4. Git operations only if there were files processed AND added to the set
   const filesToAddArray = Array.from(filesToGitAdd);
   if (filesToAddArray.length > 0) {
     try {
       logger.info('Adding, committing, and pushing changes to Git...');
       await gitAdd(filesToAddArray);
       const commitMessage = `Publish/update articles on Dev.to\n\nProcessed files:\n${results.filter(r => r.success).map(r => `- ${path.basename(r.file)} (ID: ${r.id}) -> ${r.url}`).join('\n')}`;
-      // gitCommit handles "nothing to commit" case internally
       await gitCommit(commitMessage);
-      // Only push if commit was successful (or if there was nothing to commit)
       logger.info('Pushing changes...');
       await gitPush();
       logger.success('Commit and push to Git completed.');
