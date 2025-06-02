@@ -1,0 +1,15 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "hostRequirements": {
+		"cores": 1
+	},
+	"postCreateCommand": "npm install",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"DavidAnson.vscode-markdownlint",
+				"yzhang.markdown-all-in-one"
+			]
+		}
+	}
+}
