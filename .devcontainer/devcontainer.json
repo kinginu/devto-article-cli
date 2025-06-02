@@ -3,7 +3,7 @@
   "hostRequirements": {
 		"cores": 1
 	},
-	"postCreateCommand": "npm install",
+	"postCreateCommand": "npm install && npm run build",
 	"customizations": {
 		"vscode": {
 			"extensions": [
